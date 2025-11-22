@@ -43,6 +43,9 @@ ANONYMIZATION_MAP = {
     (0x0010, 0x0010): "Name",                   # Patient's Name
     (0x0010, 0x0020): "ID",                     # Patient ID
     (0x0010, 0x0030): "19910101",               # Patient's Birth Date (DICOM format: YYYYMMDD)
+
+    # Study Information
+    (0x0020, 0x0010): "STUDY001",               # Study ID
 }
 
 # UID tags that need to be regenerated
@@ -51,7 +54,72 @@ UID_TAGS = [
     (0x0020, 0x000E),  # Series Instance UID
     (0x0008, 0x0018),  # SOP Instance UID
     (0x0020, 0x0052),  # Frame of Reference UID
+    (0x0008, 0x3010),  # Irradiation Event UID
 ]
+
+
+def update_uids_in_sequences(dataset, uid_cache: Dict[str, str], path: str = "", is_top_level: bool = True):
+    """
+    Recursively walk through dataset sequences and update all UID values.
+
+    This ensures that referenced UIDs in sequences (like Referenced SOP Instance UID
+    in Referenced RT Plan Sequence) are also anonymized, maintaining consistency
+    with the top-level UID changes.
+
+    Args:
+        dataset: DICOM dataset or sequence item to process
+        uid_cache: Dictionary mapping original UIDs to anonymized UIDs
+        path: Current path in the dataset (for debugging)
+        is_top_level: True if this is the top-level dataset (to skip file_meta and top-level UIDs)
+    """
+    # Standard UIDs that should NOT be anonymized (they define object types, not instances)
+    STANDARD_UIDS_TO_PRESERVE = [
+        '1.2.840.10008.',  # All DICOM standard UIDs start with this prefix
+    ]
+
+    # Tags that are already handled at the top level
+    TOP_LEVEL_UID_TAGS = [
+        (0x0020, 0x000D),  # Study Instance UID
+        (0x0020, 0x000E),  # Series Instance UID
+        (0x0008, 0x0018),  # SOP Instance UID
+        (0x0020, 0x0052),  # Frame of Reference UID
+        (0x0008, 0x3010),  # Irradiation Event UID
+    ]
+
+    for elem in dataset:
+        # Skip file_meta at the top level (it's handled separately)
+        if is_top_level and elem.tag.group == 0x0002:
+            continue
+
+        # Check if this element is a UID that needs to be anonymized
+        if elem.VR == 'UI' and elem.value:  # UID Value Representation
+            # Skip top-level UIDs (already handled)
+            if is_top_level and (elem.tag.group, elem.tag.elem) in TOP_LEVEL_UID_TAGS:
+                continue
+
+            # Get the original UID value
+            original_uid = elem.value
+
+            # Don't anonymize standard DICOM UIDs (SOP Class UIDs, Transfer Syntax UIDs, etc.)
+            if any(original_uid.startswith(prefix) for prefix in STANDARD_UIDS_TO_PRESERVE):
+                logger.debug(f"  Skipping standard UID: {original_uid}")
+                continue
+
+            # Check if we've already mapped this UID
+            if original_uid not in uid_cache:
+                # Generate new UID and cache it
+                uid_cache[original_uid] = generate_uid()
+                logger.debug(f"  Generated new UID for sequence reference: {original_uid} -> {uid_cache[original_uid]}")
+
+            # Update to the anonymized UID
+            elem.value = uid_cache[original_uid]
+            logger.debug(f"  Updated UID in sequence {path}.{elem.name}: {original_uid} -> {elem.value}")
+
+        # If this element is a sequence, recurse into it
+        if elem.VR == 'SQ' and elem.value:  # Sequence
+            for i, seq_item in enumerate(elem.value):
+                seq_path = f"{path}.{elem.name}[{i}]" if path else f"{elem.name}[{i}]"
+                update_uids_in_sequences(seq_item, uid_cache, seq_path, is_top_level=False)
 
 
 def anonymize_dicom_file(
@@ -103,6 +171,10 @@ def anonymize_dicom_file(
                     if hasattr(ds.file_meta, 'MediaStorageSOPInstanceUID'):
                         ds.file_meta.MediaStorageSOPInstanceUID = new_uid
                         logger.debug(f"  Updated File Meta MediaStorageSOPInstanceUID: {new_uid}")
+
+        # Update UIDs in sequences to maintain consistency
+        # This handles referenced UIDs in nested sequences (e.g., Referenced RT Plan Sequence)
+        update_uids_in_sequences(ds, uid_cache)
 
         # Create output directory if it doesn't exist
         output_path.parent.mkdir(parents=True, exist_ok=True)
