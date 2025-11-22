@@ -97,6 +97,13 @@ def anonymize_dicom_file(
                 ds[tag].value = new_uid
                 logger.debug(f"  Regenerated UID {tag}: {old_uid} -> {new_uid}")
 
+                # Sync File Meta SOP Instance UID with dataset SOP Instance UID
+                # to maintain DICOM consistency and prevent exposing original UID
+                if tag == (0x0008, 0x0018) and hasattr(ds, 'file_meta'):
+                    if hasattr(ds.file_meta, 'MediaStorageSOPInstanceUID'):
+                        ds.file_meta.MediaStorageSOPInstanceUID = new_uid
+                        logger.debug(f"  Updated File Meta MediaStorageSOPInstanceUID: {new_uid}")
+
         # Create output directory if it doesn't exist
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
