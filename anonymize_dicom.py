@@ -97,23 +97,51 @@ def update_uids_in_sequences(dataset, uid_cache: Dict[str, str], path: str = "",
             if is_top_level and (elem.tag.group, elem.tag.elem) in TOP_LEVEL_UID_TAGS:
                 continue
 
-            # Get the original UID value
-            original_uid = elem.value
+            # Handle both single and multi-valued UIDs
+            # MultiValue UIDs (e.g., SOP Classes in Study) need special handling
+            uid_value = elem.value
 
-            # Don't anonymize standard DICOM UIDs (SOP Class UIDs, Transfer Syntax UIDs, etc.)
-            if any(original_uid.startswith(prefix) for prefix in STANDARD_UIDS_TO_PRESERVE):
-                logger.debug(f"  Skipping standard UID: {original_uid}")
-                continue
+            # Check if it's a MultiValue (list of UIDs) or single UID
+            is_multi_value = hasattr(uid_value, '__iter__') and not isinstance(uid_value, str)
 
-            # Check if we've already mapped this UID
-            if original_uid not in uid_cache:
-                # Generate new UID and cache it
-                uid_cache[original_uid] = generate_uid()
-                logger.debug(f"  Generated new UID for sequence reference: {original_uid} -> {uid_cache[original_uid]}")
+            if is_multi_value:
+                # Handle multi-valued UID attribute
+                new_uids = []
+                for original_uid in uid_value:
+                    # Don't anonymize standard DICOM UIDs
+                    if any(str(original_uid).startswith(prefix) for prefix in STANDARD_UIDS_TO_PRESERVE):
+                        logger.debug(f"  Skipping standard UID in multi-value: {original_uid}")
+                        new_uids.append(original_uid)
+                        continue
 
-            # Update to the anonymized UID
-            elem.value = uid_cache[original_uid]
-            logger.debug(f"  Updated UID in sequence {path}.{elem.name}: {original_uid} -> {elem.value}")
+                    # Check if we've already mapped this UID
+                    if original_uid not in uid_cache:
+                        uid_cache[original_uid] = generate_uid()
+                        logger.debug(f"  Generated new UID for multi-value reference: {original_uid} -> {uid_cache[original_uid]}")
+
+                    new_uids.append(uid_cache[original_uid])
+                    logger.debug(f"  Updated UID in multi-value {path}.{elem.name}: {original_uid} -> {uid_cache[original_uid]}")
+
+                # Update the element with the list of new UIDs
+                elem.value = new_uids
+            else:
+                # Handle single UID
+                original_uid = uid_value
+
+                # Don't anonymize standard DICOM UIDs (SOP Class UIDs, Transfer Syntax UIDs, etc.)
+                if any(str(original_uid).startswith(prefix) for prefix in STANDARD_UIDS_TO_PRESERVE):
+                    logger.debug(f"  Skipping standard UID: {original_uid}")
+                    continue
+
+                # Check if we've already mapped this UID
+                if original_uid not in uid_cache:
+                    # Generate new UID and cache it
+                    uid_cache[original_uid] = generate_uid()
+                    logger.debug(f"  Generated new UID for sequence reference: {original_uid} -> {uid_cache[original_uid]}")
+
+                # Update to the anonymized UID
+                elem.value = uid_cache[original_uid]
+                logger.debug(f"  Updated UID in sequence {path}.{elem.name}: {original_uid} -> {elem.value}")
 
         # If this element is a sequence, recurse into it
         if elem.VR == 'SQ' and elem.value:  # Sequence
