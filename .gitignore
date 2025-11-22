@@ -1,7 +1,8 @@
 # Log files
 anonymization.log
 
-# DICOM files in input and anonymized directories
+# DICOM files
+*.dcm
 input/*.dcm
 input/**/*.dcm
 anonymized/*.dcm

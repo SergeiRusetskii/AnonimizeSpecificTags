@@ -11,7 +11,7 @@ import os
 import sys
 import logging
 from pathlib import Path
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Literal
 import pydicom
 from pydicom.uid import generate_uid
 from pydicom.errors import InvalidDicomError
@@ -54,16 +54,23 @@ UID_TAGS = [
 ]
 
 
-def anonymize_dicom_file(input_path: Path, output_path: Path) -> bool:
+def anonymize_dicom_file(
+    input_path: Path,
+    output_path: Path,
+    uid_cache: Dict[str, str]
+) -> Literal['success', 'skipped', 'failed']:
     """
     Anonymize a single DICOM file.
 
     Args:
         input_path: Path to the input DICOM file
         output_path: Path where the anonymized file should be saved
+        uid_cache: Dictionary mapping original UIDs to anonymized UIDs for consistency
 
     Returns:
-        True if successful, False otherwise
+        'success' if file was successfully anonymized
+        'skipped' if file is not a valid DICOM file
+        'failed' if an error occurred during processing
     """
     try:
         # Read the DICOM file
@@ -75,11 +82,18 @@ def anonymize_dicom_file(input_path: Path, output_path: Path) -> bool:
                 ds[tag].value = new_value
                 logger.debug(f"  Anonymized tag {tag}: {new_value}")
 
-        # Regenerate UIDs to break linkability
+        # Regenerate UIDs to break linkability while maintaining consistency
+        # across files that belong to the same study/series
         for tag in UID_TAGS:
             if tag in ds:
                 old_uid = ds[tag].value
-                new_uid = generate_uid()
+
+                # Check if we've already generated a new UID for this original UID
+                if old_uid not in uid_cache:
+                    # Generate new UID and cache it
+                    uid_cache[old_uid] = generate_uid()
+
+                new_uid = uid_cache[old_uid]
                 ds[tag].value = new_uid
                 logger.debug(f"  Regenerated UID {tag}: {old_uid} -> {new_uid}")
 
@@ -89,14 +103,14 @@ def anonymize_dicom_file(input_path: Path, output_path: Path) -> bool:
         # Save the anonymized DICOM file
         ds.save_as(str(output_path))
 
-        return True
+        return 'success'
 
     except InvalidDicomError:
         logger.warning(f"Skipped (not a valid DICOM file): {input_path}")
-        return False
+        return 'skipped'
     except Exception as e:
         logger.error(f"Error processing {input_path}: {str(e)}")
-        return False
+        return 'failed'
 
 
 def process_directory(input_dir: Path, output_dir: Path) -> Dict[str, int]:
@@ -117,6 +131,10 @@ def process_directory(input_dir: Path, output_dir: Path) -> Dict[str, int]:
         'failed': 0
     }
 
+    # UID cache to maintain consistency across files in the same study/series
+    # Maps original UIDs to their anonymized versions
+    uid_cache: Dict[str, str] = {}
+
     # Walk through all files in input directory
     for root, dirs, files in os.walk(input_dir):
         for filename in files:
@@ -131,11 +149,15 @@ def process_directory(input_dir: Path, output_dir: Path) -> Dict[str, int]:
             logger.info(f"Processing: {relative_path}")
 
             # Try to anonymize the file
-            if anonymize_dicom_file(input_path, output_path):
+            result = anonymize_dicom_file(input_path, output_path, uid_cache)
+
+            if result == 'success':
                 stats['processed'] += 1
                 logger.info(f"  ✓ Successfully anonymized: {relative_path}")
-            else:
+            elif result == 'skipped':
                 stats['skipped'] += 1
+            elif result == 'failed':
+                stats['failed'] += 1
 
     return stats
 
