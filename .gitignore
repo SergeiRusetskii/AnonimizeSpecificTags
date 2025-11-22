@@ -1,0 +1,20 @@
+# Log files
+anonymization.log
+
+# DICOM files in input and anonymized directories
+input/*.dcm
+input/**/*.dcm
+anonymized/*.dcm
+anonymized/**/*.dcm
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+venv/
+env/
+ENV/
