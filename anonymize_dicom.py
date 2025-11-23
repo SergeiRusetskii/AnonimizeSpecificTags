@@ -77,13 +77,14 @@ def update_uids_in_sequences(dataset, uid_cache: Dict[str, str], path: str = "",
         is_top_level: True if this is the top-level dataset (to skip file_meta and top-level UIDs)
     """
     # Standard UID prefixes that should NOT be anonymized
-    # These are well-known registries and standard UIDs
+    # These are well-known DICOM standard UIDs and coding system registries
+    # NOTE: We only preserve specific well-known prefixes, not broad roots like
+    # IANA PEN (1.3.6.1.4.1.*) because many sites use those roots to generate
+    # instance UIDs that MUST be anonymized
     STANDARD_UID_PREFIXES = [
-        '1.2.840.10008.',      # DICOM standard UIDs (SOP Classes, Transfer Syntaxes, etc.)
-        '2.16.840.1.113883.',  # HL7 OID namespace (includes SNOMED, LOINC, etc.)
-        '1.2.840.10065.',      # IHE
-        '1.3.6.1.4.1.',        # IANA Private Enterprise Numbers
-        '2.16.840.1.114',      # DCM4CHE and other medical registries
+        '1.2.840.10008.',      # DICOM standard UIDs (SOP Classes, Transfer Syntaxes, Well-Known SOP Instances)
+        '2.16.840.1.113883.',  # HL7 OID namespace (SNOMED, LOINC, and other coding schemes)
+        '1.2.840.10065.',      # IHE domain UIDs
     ]
 
     # UID tags that should NEVER be anonymized (class/type UIDs, not instance UIDs)
