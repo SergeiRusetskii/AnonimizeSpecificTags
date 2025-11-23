@@ -31,6 +31,7 @@ A Python tool for anonymizing specific DICOM tags while preserving folder struct
 - `(0020,000E)` Series Instance UID
 - `(0008,0018)` SOP Instance UID
 - `(0020,0052)` Frame of Reference UID
+- `(0008,3010)` Irradiation Event UID
 
 ### Preserved Tags
 - All date/time tags remain unchanged
