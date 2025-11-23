@@ -60,11 +60,15 @@ UID_TAGS = [
 
 def update_uids_in_sequences(dataset, uid_cache: Dict[str, str], path: str = "", is_top_level: bool = True):
     """
-    Recursively walk through dataset sequences and update all UID values.
+    Recursively walk through dataset sequences and update instance/reference UIDs.
 
     This ensures that referenced UIDs in sequences (like Referenced SOP Instance UID
     in Referenced RT Plan Sequence) are also anonymized, maintaining consistency
     with the top-level UID changes.
+
+    Only instance-identifying UIDs are anonymized. Class/type UIDs (SOP Class,
+    Transfer Syntax, Coding Scheme) and registry UIDs are preserved to maintain
+    data integrity and terminology references.
 
     Args:
         dataset: DICOM dataset or sequence item to process
@@ -72,10 +76,36 @@ def update_uids_in_sequences(dataset, uid_cache: Dict[str, str], path: str = "",
         path: Current path in the dataset (for debugging)
         is_top_level: True if this is the top-level dataset (to skip file_meta and top-level UIDs)
     """
-    # Standard UIDs that should NOT be anonymized (they define object types, not instances)
-    STANDARD_UIDS_TO_PRESERVE = [
-        '1.2.840.10008.',  # All DICOM standard UIDs start with this prefix
+    # Standard UID prefixes that should NOT be anonymized
+    # These are well-known registries and standard UIDs
+    STANDARD_UID_PREFIXES = [
+        '1.2.840.10008.',      # DICOM standard UIDs (SOP Classes, Transfer Syntaxes, etc.)
+        '2.16.840.1.113883.',  # HL7 OID namespace (includes SNOMED, LOINC, etc.)
+        '1.2.840.10065.',      # IHE
+        '1.3.6.1.4.1.',        # IANA Private Enterprise Numbers
+        '2.16.840.1.114',      # DCM4CHE and other medical registries
     ]
+
+    # UID tags that should NEVER be anonymized (class/type UIDs, not instance UIDs)
+    # These define object types, encoding methods, or coding schemes
+    PRESERVE_UID_TAGS = {
+        # SOP Class UIDs (define object types)
+        (0x0008, 0x0016),  # SOP Class UID
+        (0x0008, 0x1150),  # Referenced SOP Class UID
+        (0x0002, 0x0002),  # Media Storage SOP Class UID
+
+        # Transfer Syntax UIDs (define encoding methods)
+        (0x0002, 0x0010),  # Transfer Syntax UID
+        (0x0004, 0x1512),  # Referenced Transfer Syntax UID
+
+        # Coding Scheme UIDs (define coding systems like SNOMED, LOINC)
+        (0x0008, 0x010C),  # Coding Scheme UID
+        (0x0008, 0x010B),  # Context Group Extension Creator UID
+
+        # Other non-identifying UIDs
+        (0x0040, 0xDB0D),  # Template Extension Creator UID
+        (0x0008, 0x0062),  # SOP Class UID (in SOP Class Extended Negotiation Sub-Item)
+    }
 
     # Tags that are already handled at the top level
     TOP_LEVEL_UID_TAGS = [
@@ -97,6 +127,11 @@ def update_uids_in_sequences(dataset, uid_cache: Dict[str, str], path: str = "",
             if is_top_level and (elem.tag.group, elem.tag.elem) in TOP_LEVEL_UID_TAGS:
                 continue
 
+            # Skip UIDs that should be preserved (class/type UIDs, not instance UIDs)
+            if (elem.tag.group, elem.tag.elem) in PRESERVE_UID_TAGS:
+                logger.debug(f"  Preserving class/type UID {elem.name}: {elem.value}")
+                continue
+
             # Handle both single and multi-valued UIDs
             # MultiValue UIDs (e.g., SOP Classes in Study) need special handling
             uid_value = elem.value
@@ -108,9 +143,9 @@ def update_uids_in_sequences(dataset, uid_cache: Dict[str, str], path: str = "",
                 # Handle multi-valued UID attribute
                 new_uids = []
                 for original_uid in uid_value:
-                    # Don't anonymize standard DICOM UIDs
-                    if any(str(original_uid).startswith(prefix) for prefix in STANDARD_UIDS_TO_PRESERVE):
-                        logger.debug(f"  Skipping standard UID in multi-value: {original_uid}")
+                    # Don't anonymize standard DICOM UIDs or registry UIDs
+                    if any(str(original_uid).startswith(prefix) for prefix in STANDARD_UID_PREFIXES):
+                        logger.debug(f"  Preserving standard/registry UID in multi-value: {original_uid}")
                         new_uids.append(original_uid)
                         continue
 
@@ -128,9 +163,9 @@ def update_uids_in_sequences(dataset, uid_cache: Dict[str, str], path: str = "",
                 # Handle single UID
                 original_uid = uid_value
 
-                # Don't anonymize standard DICOM UIDs (SOP Class UIDs, Transfer Syntax UIDs, etc.)
-                if any(str(original_uid).startswith(prefix) for prefix in STANDARD_UIDS_TO_PRESERVE):
-                    logger.debug(f"  Skipping standard UID: {original_uid}")
+                # Don't anonymize standard DICOM UIDs or registry UIDs
+                if any(str(original_uid).startswith(prefix) for prefix in STANDARD_UID_PREFIXES):
+                    logger.debug(f"  Preserving standard/registry UID: {original_uid}")
                     continue
 
                 # Check if we've already mapped this UID
