@@ -87,6 +87,22 @@ def update_uids_in_sequences(dataset, uid_cache: Dict[str, str], path: str = "",
         '1.2.840.10065.',      # IHE domain UIDs
     ]
 
+    # Roots that frequently contain instance-identifying UIDs and must always be
+    # anonymized even if they are broad registries
+    SENSITIVE_UID_ROOTS = [
+        '1.3.6.1.4.1.',        # IANA Private Enterprise Numbers (used by many vendors for instance UIDs)
+    ]
+
+    def should_preserve_uid(uid: str) -> bool:
+        """Return True if the UID belongs to a non-identifying registry prefix."""
+
+        # Explicitly treat IANA PEN UIDs as identifying, even though they are a
+        # registry root. Many sites issue instance UIDs under this root.
+        if any(uid.startswith(root) for root in SENSITIVE_UID_ROOTS):
+            return False
+
+        return any(uid.startswith(prefix) for prefix in STANDARD_UID_PREFIXES)
+
     # UID tags that should NEVER be anonymized (class/type UIDs, not instance UIDs)
     # These define object types, encoding methods, or coding schemes
     PRESERVE_UID_TAGS = {
@@ -145,7 +161,7 @@ def update_uids_in_sequences(dataset, uid_cache: Dict[str, str], path: str = "",
                 new_uids = []
                 for original_uid in uid_value:
                     # Don't anonymize standard DICOM UIDs or registry UIDs
-                    if any(str(original_uid).startswith(prefix) for prefix in STANDARD_UID_PREFIXES):
+                    if should_preserve_uid(str(original_uid)):
                         logger.debug(f"  Preserving standard/registry UID in multi-value: {original_uid}")
                         new_uids.append(original_uid)
                         continue
@@ -165,7 +181,7 @@ def update_uids_in_sequences(dataset, uid_cache: Dict[str, str], path: str = "",
                 original_uid = uid_value
 
                 # Don't anonymize standard DICOM UIDs or registry UIDs
-                if any(str(original_uid).startswith(prefix) for prefix in STANDARD_UID_PREFIXES):
+                if should_preserve_uid(str(original_uid)):
                     logger.debug(f"  Preserving standard/registry UID: {original_uid}")
                     continue
 
